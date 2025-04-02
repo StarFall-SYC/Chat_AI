@@ -1,119 +1,69 @@
-# AI聊天大模型
+# AI聊天机器人文档
 
-![版本](https://img.shields.io/badge/版本-1.0.0-blue)
-![Python](https://img.shields.io/badge/Python-3.6+-green)
-![许可证](https://img.shields.io/badge/许可证-MIT-yellow)
+本目录包含AI聊天机器人项目的核心文档，为开发者和用户提供必要的指南和参考资料。
 
-一个基于机器学习的智能对话系统，支持中文自然语言处理和多意图识别。
+## 文档列表
 
-## 项目特点
+- [快速入门指南](QUICKSTART.md) - 快速开始使用项目的步骤和基本操作
+- [功能概览](FEATURES.md) - 详细的功能说明和技术实现
+- [项目结构](PROJECT_STRUCTURE.md) - 项目目录结构和优化说明
 
-- 📝 **多意图识别**：支持21种不同类型的对话意图
-- 🖥️ **友好界面**：提供美观的图形用户界面，支持聊天和训练功能
-- 🔄 **可扩展性**：允许添加新意图和训练数据
-- 🚀 **快速响应**：平均响应时间小于0.01秒
-- 📊 **数据分析**：支持训练数据统计和模型评估
-- 🛠️ **多种工具**：提供命令行、GUI、快速训练等多种工具
+## 训练数据说明
 
-## 安装使用
+### 数据格式
 
-### 环境要求
+AI聊天机器人使用JSON格式的训练数据，结构如下：
 
-- Python 3.6+
-- 建议在虚拟环境中运行
+```json
+[
+  {
+    "tag": "意图标签",
+    "patterns": ["用户可能的输入1", "用户可能的输入2", ...],
+    "responses": ["AI可能的回复1", "AI可能的回复2", ...]
+  },
+  ...
+]
+```
 
-### 安装步骤
+### 默认数据文件
+
+默认的训练数据文件位于 `data/training/training_data.json`。
+
+### 创建自定义数据
+
+1. 按照上述格式创建或编辑训练数据JSON文件
+2. 确保每个意图有充足的训练样本（建议至少10个patterns）
+3. 对于每个意图提供多样化的回复选项
+4. 保存文件后通过训练界面或训练脚本进行训练
+
+### 扩展数据建议
+
+为提高模型质量，建议：
+
+- 为每个意图提供不同表达方式的样本
+- 包括常见的拼写错误和语法变体
+- 添加领域特定的术语和表达方式
+- 确保样本之间有足够的差异性
+
+## 模型训练参数
+
+训练界面中可以调整以下参数：
+
+- **训练轮数**: 控制训练迭代次数，通常在100-500之间
+- **学习率**: 控制模型参数更新速度，推荐值为0.001
+- **批大小**: 每次参数更新使用的样本数量，一般设置为16-64之间
+
+## 命令行训练
+
+除了使用GUI界面，也可以通过命令行训练模型：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/your-username/ai-chat-model.git
-cd ai-chat-model
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 训练模型
-python scripts/quick_train.py
+python scripts/train.py
 ```
 
-### 快速开始
+## 进一步开发建议
 
-```bash
-# 启动完整应用（聊天+训练）
-python scripts/run_demo.py
-
-# 或仅启动聊天界面
-python scripts/start_chat.py
-
-# 或仅启动训练界面
-python scripts/start_training.py
-
-# 命令行聊天测试
-python scripts/test_chatbot.py
-```
-
-## 核心功能
-
-- **智能对话**：基于随机森林分类的意图识别，支持多种对话场景
-- **训练管理**：可视化训练数据编辑，参数可调的模型训练
-- **数据增强**：自动扩充训练样本，提高模型性能
-- **UI界面**：基于PyQt5的美观界面，支持消息气泡和历史记录
-
-## 屏幕截图
-
-*(此处可添加应用截图)*
-
-## 项目结构
-
-```
-ai_chat_model/
-├── data/                  # 数据相关
-├── models/                # 模型相关
-├── ui/                    # 用户界面
-├── scripts/               # 实用脚本
-├── docs/                  # 项目文档
-├── main.py                # 主程序入口
-└── requirements.txt       # 项目依赖
-```
-
-完整的项目结构说明请参见 [项目结构文档](docs/PROJECT_STRUCTURE.md)。
-
-## 详细文档
-
-- [功能说明](docs/FEATURES.md) - 详细功能介绍和使用方法
-- [快速入门](docs/QUICKSTART.md) - 快速上手指南和常用命令
-- [项目总结](docs/SUMMARY.md) - 项目成就和未来规划
-- [技术文档](docs/TECHNICAL.md) - 完整技术文档和架构说明
-
-## 常见问题
-
-#### Q: 如何添加新的意图？
-A: 可以编辑`data/training/extended_intents.json`文件，添加新的意图定义。
-
-#### Q: 如何提高模型准确率？
-A: 可以增加训练数据量，或尝试使用`--trees 200`参数提高随机森林的树数量。
-
-#### Q: 为什么有些意图识别率较低？
-A: 这可能是由于训练数据不足或意图之间的相似性导致的，可以添加更多样化的训练数据。
-
-## 如何贡献
-
-1. Fork本仓库
-2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交变更 (`git commit -m '添加新特性'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 打开Pull Request
-
-## 版本历史
-
-- **1.0.0** (2023-04) - 首个正式版本发布
-
-## 许可证
-
-本项目采用MIT许可证 - 详情请参阅 [LICENSE](LICENSE) 文件
-
-## 联系方式
-
-项目维护者 - your-email@example.com
-
-项目链接: [https://github.com/your-username/ai-chat-model](https://github.com/your-username/ai-chat-model) 
+1. **增加训练数据**: 为现有意图添加更多样本，或添加新的意图
+2. **调整模型参数**: 探索不同的训练参数组合
+3. **实现深度学习模型**: 考虑使用LSTM或Transformer替代随机森林
+4. **添加多语言支持**: 扩展模型以支持更多语言 
