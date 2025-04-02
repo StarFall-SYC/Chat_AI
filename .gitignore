@@ -1,0 +1,113 @@
+# Python字节码
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 发布文件
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+
+# 测试
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+
+# 日志文件
+*.log
+logs/
+log/
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.vs/
+.spyderproject
+.spyproject
+.ropeproject
+.project
+.pydevproject
+.settings/
+
+# 项目特定文件
+# 模型文件 - 通常较大，通过训练生成，不需要版本控制
+ai_chat_model/data/models/*.pth
+ai_chat_model/data/models/*.pkl
+ai_chat_model/data/models/*.h5
+ai_chat_model/data/models/*.model
+ai_chat_model/data/models/*.bin
+
+# 对话历史记录 - 用户数据，不需要版本控制
+ai_chat_model/data/history/*.json
+ai_chat_model/data/history/*.txt
+
+# 临时文件
+.DS_Store
+Thumbs.db
+.directory
+*.tmp
+*.bak
+*.swp
+*.sublime*
+
+# 大型二进制文件
+*.psd
+*.ai
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# 数据文件
+*.csv
+*.xls
+*.xlsx
+*.db
+*.sqlite3
+
+# 特定于操作系统的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 不忽略这些必要的文件
+!ai_chat_model/data/training/*.json
+!requirements.txt
+!LICENSE
+!*.md
