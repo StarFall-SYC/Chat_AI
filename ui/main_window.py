@@ -264,8 +264,13 @@ class MainWindow(QMainWindow):
         self.status_icon.setPixmap(status_pixmap)
         self.statusBar().addPermanentWidget(self.status_icon)
         
-        # 添加时间标签
+        # 添加时间标签并立即显示当前时间
         self.time_label = QLabel()
+        self.time_label.setMinimumWidth(80)  # 固定宽度防止闪烁
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label.setStyleSheet("color: #333; font-weight: bold;")
+        current_time = QTime.currentTime()
+        self.time_label.setText(current_time.toString("hh:mm:ss"))
         self.statusBar().addPermanentWidget(self.time_label)
         
         # 启动定时器，每秒更新一次时间

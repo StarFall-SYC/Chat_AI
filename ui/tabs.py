@@ -6,7 +6,8 @@
 from PyQt5.QtWidgets import (QWidget, QLabel, QTextEdit, QVBoxLayout, QHBoxLayout,
                            QPushButton, QFrame, QSpacerItem, QSizePolicy, QMessageBox,
                            QTableWidgetItem, QListWidget, QProgressBar, QSpinBox, 
-                           QDoubleSpinBox, QFileDialog, QMenu, QAction)
+                           QDoubleSpinBox, QFileDialog, QMenu, QAction, QRadioButton,
+                           QGridLayout, QCheckBox, QSplitter)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, QTimer, QPoint
 from PyQt5.QtGui import QFont, QTextCursor, QPixmap, QImage, QTextDocument
 from PyQt5.QtMultimedia import QMediaContent, QMediaPlayer
@@ -1037,94 +1038,323 @@ class TrainingTab(QWidget):
     def setup_ui(self):
         """设置UI"""
         layout = QVBoxLayout()
+        layout.setSpacing(10)
         
-        # 训练数据加载区域
-        data_group_layout = QVBoxLayout()
-        data_group_layout.addWidget(QLabel("训练数据"))
+        # 训练数据加载区域 - 使用GroupBox包装
+        data_group = QFrame()
+        data_group.setFrameShape(QFrame.StyledPanel)
+        data_group.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+        data_group_layout = QVBoxLayout(data_group)
+        data_group_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 添加标题
+        title_label = QLabel("模型类型")
+        title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        data_group_layout.addWidget(title_label)
+        
+        # 添加单选按钮组
+        radio_group_layout = QVBoxLayout()
+        radio_group_layout.setContentsMargins(5, 5, 5, 5)
+        radio_group_layout.setSpacing(5)
+        
+        # 随机森林选项
+        self.forest_radio = QRadioButton("随机森林")
+        self.forest_radio.setChecked(True)
+        radio_group_layout.addWidget(self.forest_radio)
+        
+        # 神经网络选项
+        self.nn_radio = QRadioButton("神经网络")
+        radio_group_layout.addWidget(self.nn_radio)
+        
+        # Transformer选项
+        self.transformer_radio = QRadioButton("Transformer模型")
+        radio_group_layout.addWidget(self.transformer_radio)
+        
+        data_group_layout.addLayout(radio_group_layout)
+        layout.addWidget(data_group)
+        
+        # 训练数据加载区域 - 使用GroupBox包装
+        data_load_group = QFrame()
+        data_load_group.setFrameShape(QFrame.StyledPanel)
+        data_load_group.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+        data_load_layout = QVBoxLayout(data_load_group)
+        data_load_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 添加标题
+        train_data_label = QLabel("训练数据")
+        train_data_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        data_load_layout.addWidget(train_data_label)
         
         # 数据源选择区
         data_source_layout = QHBoxLayout()
+        data_source_layout.setSpacing(10)
         
         # 添加数据加载按钮
         self.load_dir_button = QPushButton("从文件夹加载")
+        self.load_dir_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
         self.load_dir_button.clicked.connect(self.load_from_directory)
         data_source_layout.addWidget(self.load_dir_button)
         
         self.load_file_button = QPushButton("从JSON文件加载")
+        self.load_file_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
         self.load_file_button.clicked.connect(self.load_from_json)
         data_source_layout.addWidget(self.load_file_button)
         
         # 数据统计信息
         self.data_stats_label = QLabel("未加载训练数据")
+        self.data_stats_label.setStyleSheet("color: #666;")
         data_source_layout.addWidget(self.data_stats_label, 1)
         
-        data_group_layout.addLayout(data_source_layout)
+        data_load_layout.addLayout(data_source_layout)
         
         # 数据预览列表
         self.data_preview = QListWidget()
         self.data_preview.setMaximumHeight(150)
-        data_group_layout.addWidget(self.data_preview)
+        self.data_preview.setAlternatingRowColors(True)
+        self.data_preview.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QListWidget::item:alternate {
+                background-color: #f5f5f5;
+            }
+        """)
+        data_load_layout.addWidget(self.data_preview)
         
-        layout.addLayout(data_group_layout)
+        layout.addWidget(data_load_group)
         
-        # 训练设置区域
-        settings_layout = QHBoxLayout()
+        # 训练参数设置 - 使用GroupBox包装
+        params_group = QFrame()
+        params_group.setFrameShape(QFrame.StyledPanel)
+        params_group.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+        params_layout = QVBoxLayout(params_group)
+        params_layout.setContentsMargins(10, 10, 10, 10)
         
-        # 训练参数设置
+        # 添加标题
+        params_label = QLabel("训练参数")
+        params_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        params_layout.addWidget(params_label)
+        
+        # 使用网格布局替代水平布局，更好地应对窗口大小变化
+        params_grid = QGridLayout()
+        params_grid.setSpacing(10)
+        
+        # 训练轮数
+        epochs_label = QLabel("训练轮数:")
+        epochs_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        params_grid.addWidget(epochs_label, 0, 0)
+        
         self.epochs_spin = QSpinBox()
         self.epochs_spin.setRange(1, 1000)
         self.epochs_spin.setValue(200)
-        settings_layout.addWidget(QLabel("训练轮数:"))
-        settings_layout.addWidget(self.epochs_spin)
+        self.epochs_spin.setFixedWidth(100)
+        params_grid.addWidget(self.epochs_spin, 0, 1)
+        
+        # 学习率
+        lr_label = QLabel("学习率:")
+        lr_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        params_grid.addWidget(lr_label, 0, 2)
         
         self.learning_rate_spin = QDoubleSpinBox()
         self.learning_rate_spin.setRange(0.0001, 0.1)
         self.learning_rate_spin.setValue(0.001)
         self.learning_rate_spin.setSingleStep(0.0001)
-        settings_layout.addWidget(QLabel("学习率:"))
-        settings_layout.addWidget(self.learning_rate_spin)
+        self.learning_rate_spin.setFixedWidth(100)
+        params_grid.addWidget(self.learning_rate_spin, 0, 3)
+        
+        # 批大小
+        batch_label = QLabel("批大小:")
+        batch_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        params_grid.addWidget(batch_label, 1, 0)
         
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 128)
         self.batch_size_spin.setValue(32)
-        settings_layout.addWidget(QLabel("批大小:"))
-        settings_layout.addWidget(self.batch_size_spin)
+        self.batch_size_spin.setFixedWidth(100)
+        params_grid.addWidget(self.batch_size_spin, 1, 1)
         
-        layout.addLayout(settings_layout)
+        # 早停设置
+        early_stop_label = QLabel("早停:")
+        early_stop_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        params_grid.addWidget(early_stop_label, 1, 2)
+        
+        self.early_stop_check = QCheckBox()
+        self.early_stop_check.setChecked(True)
+        params_grid.addWidget(self.early_stop_check, 1, 3)
+        
+        params_layout.addLayout(params_grid)
+        layout.addWidget(params_group)
+        
+        # 训练状态和控制 - 使用GroupBox包装
+        status_group = QFrame()
+        status_group.setFrameShape(QFrame.StyledPanel)
+        status_group.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+        status_layout = QVBoxLayout(status_group)
+        status_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 添加标题
+        status_label = QLabel("训练状态")
+        status_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        status_layout.addWidget(status_label)
         
         # 训练控制按钮
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
+        
         self.start_button = QPushButton("开始训练")
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
         self.start_button.clicked.connect(self.start_training)
         button_layout.addWidget(self.start_button)
         
         self.stop_button = QPushButton("停止训练")
+        self.stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF5722;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #E64A19;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
         self.stop_button.clicked.connect(self.stop_training)
         self.stop_button.setEnabled(False)
         button_layout.addWidget(self.stop_button)
         
         # 添加保存训练结果按钮
         self.save_button = QPushButton("保存模型")
+        self.save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #388E3C;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
         self.save_button.clicked.connect(self.save_model)
         self.save_button.setEnabled(False)
         button_layout.addWidget(self.save_button)
         
-        layout.addLayout(button_layout)
+        status_layout.addLayout(button_layout)
         
         # 进度条
         self.progress_bar = QProgressBar()
-        layout.addWidget(self.progress_bar)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                text-align: center;
+                height: 20px;
+            }
+            QProgressBar::chunk {
+                background-color: #2196F3;
+                width: 10px;
+            }
+        """)
+        status_layout.addWidget(self.progress_bar)
+        
+        layout.addWidget(status_group)
+        
+        # 训练日志和曲线 - 使用分割器
+        viz_splitter = QSplitter(Qt.Horizontal)
+        
+        # 训练日志
+        log_frame = QFrame()
+        log_frame.setFrameShape(QFrame.StyledPanel)
+        log_frame.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+        log_layout = QVBoxLayout(log_frame)
+        log_layout.setContentsMargins(10, 10, 10, 10)
+        
+        log_label = QLabel("训练日志")
+        log_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        log_layout.addWidget(log_label)
+        
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                font-family: monospace;
+            }
+        """)
+        log_layout.addWidget(self.status_text)
+        
+        viz_splitter.addWidget(log_frame)
         
         # 训练曲线
         if MATPLOTLIB_AVAILABLE:
-            self.figure, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(8, 8))
+            viz_frame = QFrame()
+            viz_frame.setFrameShape(QFrame.StyledPanel)
+            viz_frame.setStyleSheet("QFrame { background-color: #f8f9fa; border-radius: 5px; }")
+            viz_layout = QVBoxLayout(viz_frame)
+            viz_layout.setContentsMargins(10, 10, 10, 10)
+            
+            viz_label = QLabel("训练曲线")
+            viz_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+            viz_layout.addWidget(viz_label)
+            
+            self.figure, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(6, 6))
             self.canvas = FigureCanvas(self.figure)
-            layout.addWidget(self.canvas)
+            viz_layout.addWidget(self.canvas)
+            
+            viz_splitter.addWidget(viz_frame)
         
-        # 状态文本
-        self.status_text = QTextEdit()
-        self.status_text.setReadOnly(True)
-        layout.addWidget(self.status_text)
+        # 设置分割器比例
+        viz_splitter.setSizes([400, 400])
+        layout.addWidget(viz_splitter, 1)  # 给予分割器最大的拉伸空间
         
         self.setLayout(layout)
         
