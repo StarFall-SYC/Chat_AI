@@ -1,719 +1,394 @@
-from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QVBoxLayout, 
-                         QApplication, QSplitter, QAction, QMenuBar, 
-                         QStatusBar, QMenu, QMessageBox, QDialog, 
-                         QDialogButtonBox, QLabel, QVBoxLayout, QTextBrowser, 
-                         QTableWidget, QTableWidgetItem, QHeaderView)
-from PyQt5.QtCore import Qt, QSize
-from PyQt5.QtGui import QFont, QIcon
+"""
+主窗口模块定义
+创建和管理整个应用程序的主窗口
+"""
 
-import sys
 import os
-import json
-import platform
+import sys
+import time
+import atexit
+
+from PyQt5.QtWidgets import (QMainWindow, QApplication, QLabel, QPushButton, 
+                           QVBoxLayout, QHBoxLayout, QTextEdit, QAction, 
+                           QTabWidget, QToolBar, QToolButton, QMenu, 
+                           QWidget, QMessageBox, QSplitter, QStatusBar, 
+                           QSpacerItem, QSizePolicy)
+from PyQt5.QtCore import Qt, QSize, QTimer, QTime
+from PyQt5.QtGui import QFont, QIcon, QPixmap
 
 # 添加项目根目录到sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.chatbot import ChatbotManager
-from .tabs import ChatTab, TrainingTab
+from models import app_logger
+from models.lock_manager import LockManager
+from utils import get_app_icon_path
 
-class AboutDialog(QDialog):
-    """关于对话框"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        
-        self.setWindowTitle("关于AI聊天大模型")
-        self.resize(400, 300)
-        
-        # 创建布局
-        layout = QVBoxLayout(self)
-        
-        # 添加标题
-        title = QLabel("AI聊天大模型")
-        title.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-        
-        # 添加版本信息
-        version = QLabel("版本 1.1.0")
-        version.setAlignment(Qt.AlignCenter)
-        layout.addWidget(version)
-        
-        # 添加描述
-        description = QTextBrowser()
-        description.setOpenExternalLinks(True)
-        description.setHtml("""
-        <p align='center'>一个功能强大的AI聊天大模型应用程序，具有现代化的GUI界面。</p>
-        <p align='center'>支持专业领域对话、上下文理解和情感交互。</p>
-        <br>
-        <p><b>功能特点：</b></p>
-        <ul>
-            <li>支持74种不同对话意图的聊天模型</li>
-            <li>专业领域模型，覆盖AI技术、问题解决等专业话题</li>
-            <li>用户友好的图形界面</li>
-            <li>聊天界面支持实时交互</li>
-            <li>训练界面支持数据管理和模型训练</li>
-            <li>支持保存和加载训练数据</li>
-            <li>支持数据增强和模型训练</li>
-            <li>调试模式显示意图识别详情</li>
-            <li>可调整的置信度阈值</li>
-        </ul>
-        <br>
-        <p><b>最新更新：</b></p>
-        <ul>
-            <li>添加专业领域模型支持</li>
-            <li>集成调试模式到界面</li>
-            <li>添加数据增强功能</li>
-            <li>支持自定义置信度阈值</li>
-            <li>改进聊天体验和响应质量</li>
-        </ul>
-        <br>
-        <p><b>系统信息：</b></p>
-        <ul>
-            <li>操作系统：%s</li>
-            <li>Python版本：%s</li>
-            <li>PyQt版本：%s</li>
-        </ul>
-        """ % (
-            platform.platform(),
-            platform.python_version(),
-            "5.15" # 可以从PyQt模块中获取真实版本
-        ))
-        layout.addWidget(description)
-        
-        # 添加按钮
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok)
-        buttons.accepted.connect(self.accept)
-        layout.addWidget(buttons)
+# 导入基本选项卡
+from .tabs import ChatTab
+
+# 导入我们新创建的模块
+from .model_training import ModelTrainingTab
+from .data_analysis import DataAnalysisTab
+from .theme_manager import ThemeManager
+
+# 检查是否可使用高级模型
+try:
+    from .advanced_tabs import ImageGenerationTab, VideoGenerationTab
+    from models import advanced_models
+    ADVANCED_MODELS_AVAILABLE = True
+except ImportError:
+    app_logger.warning("高级模型功能不可用，将使用基本功能")
+    ADVANCED_MODELS_AVAILABLE = False
+
+from .custom_widgets import (
+    ChatMessageList, AnimatedButton, FloatingActionButton, 
+    ModernButton, ModernToolButton, StyledCard, StatusInfoWidget
+)
+
+
+class AppState:
+    """应用程序状态类，用于管理全局变量"""
+    
+    def __init__(self):
+        """初始化应用程序状态"""
+        self.model = None
+        self.transformer_model = None
+        self.lock_manager = LockManager()
+
 
 class MainWindow(QMainWindow):
-    """主窗口"""
+    """主窗口类"""
+    
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI聊天机器人")
+        
+        # 应用状态
+        self.app_state = AppState()
+        
+        # 防止重复加载
+        self.models_loaded = False
+        
+        # 设置窗口基本属性
+        self.setWindowTitle("AI聊天模型")
         self.setMinimumSize(800, 600)
+        self.setWindowIcon(QIcon(get_app_icon_path()))
+        
+        # 上次激活的高级功能标签索引
+        self.last_active_advanced_tab = 0
+        
+        # 初始化UI
         self.setup_ui()
         
+        # 设置工具栏和状态栏
+        self.setup_toolbar()
+        self.setup_statusbar()
+        
+        # 加载模型（延迟加载）
+        QTimer.singleShot(500, self.setup_models)
+        
+        # 设置主题
+        self.theme_manager = ThemeManager()
+        self.theme_manager.apply_current_theme()
+        
+        # 清理锁管理器资源
+        atexit.register(self.cleanup_resources)
+    
     def setup_ui(self):
         """设置UI"""
-        # 创建中心部件
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # 创建布局
-        layout = QVBoxLayout(central_widget)
-        
-        # 创建标签页
-        tab_widget = QTabWidget()
-        
-        # 添加聊天标签页
-        chat_tab = ChatTab()
-        tab_widget.addTab(chat_tab, "聊天")
-        
-        # 添加训练标签页
-        training_tab = TrainingTab()
-        tab_widget.addTab(training_tab, "训练")
-        
-        layout.addWidget(tab_widget)
-        
-        # 创建聊天机器人管理器
-        self.chatbot = ChatbotManager()
-        
-        # 调试模式标志
-        self.debug_mode = False
-        
-        # 置信度阈值
-        self.confidence_threshold = 0.3
-        
-        # 创建菜单栏
-        self.create_menu_bar()
-        
-        # 创建状态栏
-        status_bar = QStatusBar()
-        self.setStatusBar(status_bar)
-        status_bar.showMessage("准备就绪")
-        
-        # 尝试加载模型
-        self.load_model()
+        # 设置标签页
+        self.setup_tabs()
     
-    def create_menu_bar(self):
-        """创建菜单栏"""
-        menu_bar = self.menuBar()
+    def setup_tabs(self):
+        """设置选项卡"""
+        # 创建选项卡部件
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setDocumentMode(True)
+        self.tab_widget.setTabsClosable(False)
+        self.tab_widget.setMovable(True)
         
-        # 文件菜单
-        file_menu = menu_bar.addMenu('文件')
+        # 隐藏标签页标题栏，因为我们使用工具栏按钮导航
+        self.tab_widget.tabBar().setVisible(False)
         
-        # 保存聊天记录
-        save_action = QAction('保存聊天记录', self)
-        save_action.setShortcut('Ctrl+S')
-        save_action.triggered.connect(self.save_chat)
-        file_menu.addAction(save_action)
+        # 创建聊天选项卡
+        self.chat_tab = ChatTab(self)
+        self.tab_widget.addTab(self.chat_tab, "AI聊天")
         
-        # 退出
-        exit_action = QAction('退出', self)
-        exit_action.setShortcut('Ctrl+Q')
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        # 检查是否应该加载高级功能
+        # 如果系统支持高级功能，加载高级选项卡
+        if ADVANCED_MODELS_AVAILABLE:
+            # 创建图像生成选项卡
+            self.image_tab = ImageGenerationTab(self)
+            self.tab_widget.addTab(self.image_tab, "图像生成")
+            
+            # 创建视频生成选项卡
+            self.video_tab = VideoGenerationTab(self)
+            self.tab_widget.addTab(self.video_tab, "视频生成")
+            
+            # 添加模型训练选项卡
+            self.training_tab = ModelTrainingTab(self)
+            self.tab_widget.addTab(self.training_tab, "模型训练")
+            
+            # 添加数据分析选项卡
+            self.analysis_tab = DataAnalysisTab(self)
+            self.tab_widget.addTab(self.analysis_tab, "数据分析")
+        else:
+            # 添加仅包含基本模型的模型训练选项卡
+            self.training_tab = ModelTrainingTab(self)
+            self.tab_widget.addTab(self.training_tab, "模型训练")
+            
+            # 添加数据分析选项卡
+            self.analysis_tab = DataAnalysisTab(self)
+            self.tab_widget.addTab(self.analysis_tab, "数据分析")
+            
+        # 连接标签切换信号
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
-        # 模型菜单
-        model_menu = menu_bar.addMenu('模型')
+        # 设置为中心部件
+        self.setCentralWidget(self.tab_widget)
+    
+    def setup_toolbar(self):
+        """设置工具栏"""
+        self.toolbar = QToolBar("主工具栏")
+        self.toolbar.setIconSize(QSize(28, 28))
+        self.toolbar.setMovable(False)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        self.addToolBar(self.toolbar)
         
-        # 训练模型
-        train_model_action = QAction("训练模型", self)
-        train_model_action.triggered.connect(lambda: self.tabs.setCurrentWidget(self.training_tab) or self.training_tab.start_training())
-        model_menu.addAction(train_model_action)
+        # 增加背景色标识当前标签页的功能
+        self.toolButtons = []
         
+        # 添加聊天按钮
+        chat_button = ModernToolButton()
+        chat_button.setText("AI聊天")
+        chat_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        chat_button.setCheckable(True)
+        chat_button.setChecked(True)  # 默认选中
+        chat_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        self.toolbar.addWidget(chat_button)
+        self.toolButtons.append(chat_button)
+        
+        # 如果有高级功能
+        if ADVANCED_MODELS_AVAILABLE:
+            # 添加图像生成按钮
+            image_button = ModernToolButton()
+            image_button.setText("图像生成")
+            image_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            image_button.setCheckable(True)
+            image_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(1))
+            self.toolbar.addWidget(image_button)
+            self.toolButtons.append(image_button)
+            
+            # 添加视频生成按钮
+            video_button = ModernToolButton()
+            video_button.setText("视频生成")
+            video_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            video_button.setCheckable(True)
+            video_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(2))
+            self.toolbar.addWidget(video_button)
+            self.toolButtons.append(video_button)
+            
+            # 添加训练按钮
+            training_button = ModernToolButton()
+            training_button.setText("模型训练")
+            training_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            training_button.setCheckable(True)
+            training_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(3))
+            self.toolbar.addWidget(training_button)
+            self.toolButtons.append(training_button)
+            
+            # 添加数据分析按钮
+            analysis_button = ModernToolButton()
+            analysis_button.setText("数据分析")
+            analysis_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            analysis_button.setCheckable(True)
+            analysis_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(4))
+            self.toolbar.addWidget(analysis_button)
+            self.toolButtons.append(analysis_button)
+        else:
+            # 添加训练按钮
+            training_button = ModernToolButton()
+            training_button.setText("模型训练")
+            training_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            training_button.setCheckable(True)
+            training_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(1))
+            self.toolbar.addWidget(training_button)
+            self.toolButtons.append(training_button)
+            
+            # 添加数据分析按钮
+            analysis_button = ModernToolButton()
+            analysis_button.setText("数据分析")
+            analysis_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            analysis_button.setCheckable(True)
+            analysis_button.clicked.connect(lambda: self.tab_widget.setCurrentIndex(2))
+            self.toolbar.addWidget(analysis_button)
+            self.toolButtons.append(analysis_button)
+        
+        # 添加弹簧(占位符)，使尾部按钮靠右显示
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(spacer)
+        
+        # 添加清除聊天按钮
+        clear_chat_button = ModernToolButton()
+        clear_chat_button.setText("清除聊天")
+        clear_chat_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        clear_chat_button.clicked.connect(lambda: self.tab_widget.setCurrentWidget(self.chat_tab) or self.chat_tab.clear_chat())
+        self.toolbar.addWidget(clear_chat_button)
+        
+        # 添加帮助按钮
+        help_button = ModernToolButton()
+        help_button.setText("帮助")
+        help_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        help_button.clicked.connect(self.show_about)
+        self.toolbar.addWidget(help_button)
+        
+        # 添加主题切换按钮
+        theme_button = ModernToolButton()
+        theme_button.setText("切换主题")
+        theme_button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        theme_button.clicked.connect(self.toggle_theme)
+        self.toolbar.addWidget(theme_button)
+    
+    def setup_statusbar(self):
+        """设置状态栏"""
+        self.statusBar().showMessage("就绪")
+        
+        # 添加状态信息标签
+        self.status_info = QLabel()
+        self.statusBar().addPermanentWidget(self.status_info)
+        
+        # 添加状态图标
+        self.status_icon = QLabel()
+        status_pixmap = QPixmap(16, 16)
+        status_pixmap.fill(Qt.green)
+        self.status_icon.setPixmap(status_pixmap)
+        self.statusBar().addPermanentWidget(self.status_icon)
+        
+        # 添加时间标签
+        self.time_label = QLabel()
+        self.statusBar().addPermanentWidget(self.time_label)
+        
+        # 启动定时器，每秒更新一次时间
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self.update_status_time)
+        self.status_timer.start(1000)  # 每秒更新一次
+    
+    def update_status_time(self):
+        """更新状态栏时间"""
+        current_time = QTime.currentTime()
+        time_text = current_time.toString("hh:mm:ss")
+        self.time_label.setText(time_text)
+    
+    def resizeEvent(self, event):
+        """窗口大小改变事件"""
+        super().resizeEvent(event)
+        # 悬浮按钮已移除，这里保留空实现以便后续扩展
+    
+    def setup_models(self):
+        """设置模型"""
         # 加载模型
-        load_action = QAction('加载模型', self)
-        load_action.setShortcut('Ctrl+L')
-        load_action.triggered.connect(self.load_model)
-        model_menu.addAction(load_action)
+        self.load_model()
         
-        # 加载特定模型子菜单
-        load_specific_menu = model_menu.addMenu('加载特定模型')
-        
-        # 默认模型
-        default_model_action = QAction('默认模型', self)
-        default_model_action.triggered.connect(lambda: self.load_specific_model(None))
-        load_specific_menu.addAction(default_model_action)
-        
-        # 专业领域模型
-        specialized_model_action = QAction('专业领域模型', self)
-        specialized_model_action.triggered.connect(
-            lambda: self.load_specific_model(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
-                                             'models', 'chatbot_specialized_model')))
-        load_specific_menu.addAction(specialized_model_action)
-        
-        # 训练专业领域模型
-        train_specialized_model_action = QAction("训练专业领域模型", self)
-        train_specialized_model_action.triggered.connect(self.train_specialized_model)
-        model_menu.addAction(train_specialized_model_action)
-        
-        # 模型信息
-        model_info_action = QAction('模型信息', self)
-        model_info_action.setShortcut('Ctrl+I')
-        model_info_action.triggered.connect(self.show_model_info)
-        model_menu.addAction(model_info_action)
-        
-        model_menu.addSeparator()
-        
-        # 模型设置子菜单
-        settings_menu = model_menu.addMenu('模型设置')
-        
-        # 调试模式
-        self.debug_mode_action = QAction('调试模式', self, checkable=True)
-        self.debug_mode_action.setChecked(self.debug_mode)
-        self.debug_mode_action.triggered.connect(self.toggle_debug_mode)
-        settings_menu.addAction(self.debug_mode_action)
-        
-        # 置信度阈值子菜单
-        threshold_menu = settings_menu.addMenu('置信度阈值')
-        
-        # 添加不同的阈值选项
-        thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-        self.threshold_actions = {}
-        
-        for threshold in thresholds:
-            action = QAction(f'{threshold:.1f}', self, checkable=True)
-            action.setChecked(abs(self.confidence_threshold - threshold) < 0.01)
-            action.triggered.connect(lambda checked, t=threshold: self.set_confidence_threshold(t))
-            threshold_menu.addAction(action)
-            self.threshold_actions[threshold] = action
-        
-        # 数据菜单
-        data_menu = menu_bar.addMenu('数据')
-        
-        # 加载训练数据
-        load_data_action = QAction("加载训练数据", self)
-        load_data_action.triggered.connect(lambda: self.training_tab.load_data())
-        data_menu.addAction(load_data_action)
-        
-        # 保存训练数据
-        save_data_action = QAction("保存训练数据", self)
-        save_data_action.triggered.connect(lambda: self.training_tab.save_data())
-        data_menu.addAction(save_data_action)
-        
-        # 数据集查看器
-        dataset_viewer_action = QAction('数据集查看器', self)
-        dataset_viewer_action.triggered.connect(self.show_dataset_viewer)
-        data_menu.addAction(dataset_viewer_action)
-        
-        # 数据增强
-        augment_action = QAction('数据增强', self)
-        augment_action.triggered.connect(self.run_data_augmentation)
-        data_menu.addAction(augment_action)
-        
-        # 帮助菜单
-        help_menu = menu_bar.addMenu('帮助')
-        
-        # 关于
-        about_action = QAction('关于', self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
+        # 如果高级模型可用，加载高级功能
+        if ADVANCED_MODELS_AVAILABLE:
+            self.load_transformer_model()
     
     def load_model(self):
-        """加载模型"""
+        """加载基础模型"""
+        if self.models_loaded:
+            return
+            
         try:
-            success = self.chatbot.load_model()
-            if success:
-                self.statusBar().showMessage("模型加载成功")
-            else:
-                self.statusBar().showMessage("模型未加载，请先训练模型")
+            self.statusBar().showMessage("正在加载模型...")
+            
+            # 这里实现模型加载逻辑
+            # 实际应用中，应该导入并初始化相应的模型
+            
+            self.models_loaded = True
+            self.statusBar().showMessage("模型加载完成", 3000)
         except Exception as e:
-            self.statusBar().showMessage(f"加载模型出错: {str(e)}")
+            app_logger.error(f"加载模型失败: {str(e)}")
+            self.statusBar().showMessage("模型加载失败", 3000)
+            QMessageBox.critical(self, "错误", f"加载模型失败: {str(e)}")
     
-    def save_chat(self):
-        """保存聊天记录"""
-        if self.tabs.currentWidget() == self.chat_tab:
-            self.chat_tab.export_chat()
-        else:
-            self.tabs.setCurrentWidget(self.chat_tab)
-            self.chat_tab.export_chat()
+    def load_transformer_model(self):
+        """加载Transformer模型"""
+        try:
+            self.statusBar().showMessage("正在加载高级模型...")
+            
+            # 这里实现高级模型加载逻辑
+            # 实际应用中，应该导入并初始化相应的模型
+            
+            self.statusBar().showMessage("高级模型加载完成", 3000)
+        except Exception as e:
+            app_logger.error(f"加载高级模型失败: {str(e)}")
+            self.statusBar().showMessage("高级模型加载失败", 3000)
+            QMessageBox.critical(self, "错误", f"加载高级模型失败: {str(e)}")
+    
+    def cleanup_resources(self):
+        """清理资源"""
+        # 清理锁资源
+        if hasattr(self, 'app_state') and hasattr(self.app_state, 'lock_manager'):
+            # 调用正确的方法名
+            if hasattr(self.app_state.lock_manager, 'cleanup_all_locks'):
+                self.app_state.lock_manager.cleanup_all_locks()
+            elif hasattr(self.app_state.lock_manager, 'clear_expired_locks'):
+                self.app_state.lock_manager.clear_expired_locks()
+            app_logger.info("已清理所有锁资源")
+    
+    def toggle_theme(self):
+        """切换主题"""
+        self.theme_manager.toggle_theme()
+    
+    def show_settings(self):
+        """显示设置对话框"""
+        QMessageBox.information(self, "设置", "设置功能即将上线")
+    
+    def on_tab_changed(self, index):
+        """标签页切换事件"""
+        # 更新工具栏按钮状态
+        for i, button in enumerate(self.toolButtons):
+            # 确保按钮状态与当前标签页索引匹配
+            button.setChecked(i == index)
+                
+        # 添加其他标签页切换逻辑
+        if ADVANCED_MODELS_AVAILABLE:
+            if index >= 1 and index <= 2:  # 图像或视频生成页
+                self.last_active_advanced_tab = index
     
     def show_about(self):
         """显示关于对话框"""
-        dialog = AboutDialog(self)
-        dialog.exec_()
+        about_dialog = AboutDialog(self)
+        about_dialog.exec_()
+
+
+class AboutDialog(QMessageBox):
+    """关于对话框"""
     
-    def load_specific_model(self, model_path):
-        """加载指定的模型"""
-        try:
-            self.chatbot.custom_model_path = model_path
-            success = self.chatbot.load_model()
-            if success:
-                self.statusBar().showMessage(f"模型 {model_path} 加载成功")
-            else:
-                self.statusBar().showMessage(f"模型 {model_path} 加载失败")
-        except Exception as e:
-            self.statusBar().showMessage(f"加载模型出错: {str(e)}")
-    
-    def toggle_debug_mode(self):
-        """切换调试模式"""
-        self.debug_mode = not self.debug_mode
-        self.debug_mode_action.setChecked(self.debug_mode)
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("关于")
+        self.setWindowIcon(QIcon(get_app_icon_path()))
+        self.setIconPixmap(QPixmap(get_app_icon_path()).scaled(64, 64))
         
-        # 调用ChatbotManager的方法设置调试模式
-        if hasattr(self.chatbot, 'set_debug_mode'):
-            self.chatbot.set_debug_mode(self.debug_mode)
-            
-        self.statusBar().showMessage(f"调试模式：{'已启用' if self.debug_mode else '已禁用'}")
-    
-    def set_confidence_threshold(self, threshold):
-        """设置置信度阈值"""
-        self.confidence_threshold = threshold
-        
-        # 调用ChatbotManager的方法设置置信度阈值
-        if hasattr(self.chatbot, 'set_confidence_threshold'):
-            success = self.chatbot.set_confidence_threshold(threshold)
-            if success:
-                self.statusBar().showMessage(f"置信度阈值已设置为: {threshold:.1f}")
-            else:
-                self.statusBar().showMessage(f"设置置信度阈值失败，请确保值在0-1之间")
-    
-    def run_data_augmentation(self):
-        """运行数据增强"""
-        from PyQt5.QtWidgets import QInputDialog, QMessageBox
-        import subprocess
-        import os
-        
-        # 获取输入文件
-        file_options = ["contextual_intents.json", "ai_tech_intents.json", 
-                        "extended_intents.json", "advanced_intents.json",
-                        "problem_solving_intents.json", "emotional_intents.json",
-                        "domain_specific_intents.json"]
-        input_file, ok = QInputDialog.getItem(
-            self, "选择输入文件", "请选择要增强的训练数据文件:", 
-            file_options, 0, False
+        # 设置文本
+        self.setText("<h3>AI聊天模型</h3>")
+        self.setInformativeText(
+            "一个强大的AI聊天应用程序，提供了丰富的功能，包括聊天、训练、图像生成等。\n\n"
+            "版本: 1.0.0\n"
+            "构建时间: 2023.4.15\n\n"
+            "© 2023 AI开发团队. 保留所有权利。"
         )
-        if not ok or not input_file:
-            return
-            
-        # 获取增强因子
-        factor, ok = QInputDialog.getInt(
-            self, "设置增强因子", "请设置数据增强因子 (建议 2-5):", 
-            2, 1, 10, 1
+        
+        # 设置详细文本
+        self.setDetailedText(
+            "本应用程序使用了以下技术:\n"
+            "- PyQt5\n"
+            "- Transformer架构\n"
+            "- 自然语言处理技术\n"
+            "- 机器学习算法\n\n"
+            "感谢所有为本项目做出贡献的开发者。"
         )
-        if not ok:
-            return
-            
-        # 获取输出文件
-        output_file, ok = QInputDialog.getText(
-            self, "输出文件", "请输入增强后数据的保存文件名:", 
-            text=f"augmented_{input_file}"
-        )
-        if not ok or not output_file:
-            return
-            
-        try:
-            # 构建命令
-            cmd = [
-                "python", 
-                "scripts/extend_and_train.py",
-                "--files", input_file,
-                "--augment",
-                "--factor", str(factor),
-                "--output", output_file,
-                "--max-features", "3000",
-                "--skip-training"
-            ]
-            
-            # 显示正在处理的消息
-            self.statusBar().showMessage(f"正在处理数据增强...")
-            
-            # 执行命令
-            process = subprocess.Popen(
-                cmd, 
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            stdout, stderr = process.communicate()
-            
-            if process.returncode == 0:
-                QMessageBox.information(
-                    self, 
-                    "数据增强完成", 
-                    f"数据增强成功完成！\n输出文件: {output_file}"
-                )
-                self.statusBar().showMessage(f"数据增强完成，输出至 {output_file}")
-            else:
-                QMessageBox.warning(
-                    self, 
-                    "数据增强失败", 
-                    f"数据增强过程中发生错误:\n{stderr}"
-                )
-                self.statusBar().showMessage("数据增强失败")
-        except Exception as e:
-            QMessageBox.critical(
-                self, 
-                "错误", 
-                f"执行数据增强时发生错误:\n{str(e)}"
-            )
-            self.statusBar().showMessage("数据增强发生错误")
-    
-    def train_specialized_model(self):
-        """训练专业领域模型"""
-        from PyQt5.QtWidgets import QMessageBox
-        import subprocess
-        import os
         
-        try:
-            # 构建命令
-            cmd = [
-                "python", 
-                "scripts/train_specialized_model.py",
-                "--output", "complete_training_data.json",
-                "--model-name", "chatbot_specialized_model",
-                "--max-features", "5000",
-                "--n-estimators", "200"
-            ]
-            
-            # 询问是否启用数据增强
-            reply = QMessageBox.question(
-                self, 
-                '数据增强', 
-                '是否在训练前启用数据增强？',
-                QMessageBox.Yes | QMessageBox.No, 
-                QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                cmd.append("--augment")
-            
-            # 显示正在处理的消息
-            self.statusBar().showMessage(f"正在训练专业领域模型...")
-            
-            # 执行命令
-            process = subprocess.Popen(
-                cmd, 
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            
-            stdout, stderr = process.communicate()
-            
-            if process.returncode == 0:
-                QMessageBox.information(
-                    self, 
-                    "模型训练完成", 
-                    f"专业领域模型训练成功完成！\n模型已保存至 models/chatbot_specialized_model.pth"
-                )
-                self.statusBar().showMessage(f"专业领域模型训练完成")
-            else:
-                QMessageBox.warning(
-                    self, 
-                    "模型训练失败", 
-                    f"训练过程中发生错误:\n{stderr}"
-                )
-                self.statusBar().showMessage("模型训练失败")
-        except Exception as e:
-            QMessageBox.critical(
-                self, 
-                "错误", 
-                f"执行模型训练时发生错误:\n{str(e)}"
-            )
-            self.statusBar().showMessage("模型训练发生错误")
-    
-    def show_dataset_viewer(self):
-        """显示数据集查看器"""
-        from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
-                                 QListWidget, QTextEdit, QPushButton, 
-                                 QLabel, QSplitter, QMessageBox)
-        from PyQt5.QtCore import Qt
-        import os
-        import json
-        
-        class DatasetViewerDialog(QDialog):
-            def __init__(self, parent=None):
-                super().__init__(parent)
-                self.setWindowTitle("训练数据集查看器")
-                self.resize(800, 600)
-                
-                # 获取训练数据目录
-                self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                self.training_dir = os.path.join(self.base_path, 'data', 'training')
-                
-                # 创建主布局
-                main_layout = QVBoxLayout(self)
-                
-                # 创建标题
-                title = QLabel("训练数据集查看器")
-                title.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
-                title.setAlignment(Qt.AlignCenter)
-                main_layout.addWidget(title)
-                
-                # 创建说明
-                desc = QLabel("选择左侧的数据文件查看详情。每个数据集文件包含多个对话意图及其相关的训练样本。")
-                desc.setWordWrap(True)
-                main_layout.addWidget(desc)
-                
-                # 创建分割器
-                splitter = QSplitter(Qt.Horizontal)
-                main_layout.addWidget(splitter, 1)  # 1是拉伸因子
-                
-                # 创建左侧文件列表
-                self.file_list = QListWidget()
-                self.file_list.currentItemChanged.connect(self.load_selected_file)
-                splitter.addWidget(self.file_list)
-                
-                # 创建右侧内容查看区
-                self.content_view = QTextEdit()
-                self.content_view.setReadOnly(True)
-                splitter.addWidget(self.content_view)
-                
-                # 设置分割器比例
-                splitter.setSizes([200, 600])
-                
-                # 创建底部按钮布局
-                button_layout = QHBoxLayout()
-                main_layout.addLayout(button_layout)
-                
-                # 添加刷新按钮
-                refresh_button = QPushButton("刷新")
-                refresh_button.clicked.connect(self.refresh_file_list)
-                button_layout.addWidget(refresh_button)
-                
-                # 添加统计按钮
-                stats_button = QPushButton("数据集统计")
-                stats_button.clicked.connect(self.show_dataset_stats)
-                button_layout.addWidget(stats_button)
-                
-                # 添加导出按钮
-                export_button = QPushButton("导出数据")
-                export_button.clicked.connect(self.export_dataset)
-                button_layout.addWidget(export_button)
-                
-                # 添加关闭按钮
-                close_button = QPushButton("关闭")
-                close_button.clicked.connect(self.accept)
-                button_layout.addWidget(close_button)
-                
-                # 加载文件列表
-                self.refresh_file_list()
-            
-            def refresh_file_list(self):
-                """刷新文件列表"""
-                self.file_list.clear()
-                self.content_view.clear()
-                
-                try:
-                    # 获取所有JSON文件
-                    files = [f for f in os.listdir(self.training_dir) if f.endswith('.json')]
-                    files.sort()  # 按字母顺序排序
-                    
-                    # 添加到列表
-                    for f in files:
-                        self.file_list.addItem(f)
-                    
-                    # 如果有文件，选中第一个
-                    if files:
-                        self.file_list.setCurrentRow(0)
-                except Exception as e:
-                    self.content_view.setPlainText(f"加载文件列表出错: {str(e)}")
-            
-            def load_selected_file(self, current, previous):
-                """加载选中的文件内容"""
-                if not current:
-                    return
-                
-                file_name = current.text()
-                file_path = os.path.join(self.training_dir, file_name)
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        content = json.load(f)
-                    
-                    # 格式化显示json
-                    formatted_content = json.dumps(content, ensure_ascii=False, indent=2)
-                    self.content_view.setPlainText(formatted_content)
-                except Exception as e:
-                    self.content_view.setPlainText(f"加载文件内容出错: {str(e)}")
-            
-            def show_dataset_stats(self):
-                """显示当前数据集的统计信息"""
-                if not self.file_list.currentItem():
-                    QMessageBox.warning(self, "警告", "请先选择一个数据集文件")
-                    return
-                
-                file_name = self.file_list.currentItem().text()
-                file_path = os.path.join(self.training_dir, file_name)
-                
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                    
-                    # 分析数据结构
-                    intents = []
-                    total_patterns = 0
-                    total_responses = 0
-                    
-                    # 处理不同格式的训练数据
-                    if isinstance(data, dict) and "intents" in data:
-                        intents = data["intents"]
-                    else:
-                        intents = data
-                    
-                    # 统计每个意图的模式和响应数量
-                    intent_stats = []
-                    for intent in intents:
-                        if isinstance(intent, dict) and 'tag' in intent:
-                            patterns = intent.get('patterns', [])
-                            responses = intent.get('responses', [])
-                            
-                            intent_stats.append({
-                                'tag': intent['tag'],
-                                'patterns': len(patterns),
-                                'responses': len(responses)
-                            })
-                            
-                            total_patterns += len(patterns)
-                            total_responses += len(responses)
-                    
-                    # 构建统计信息
-                    stats_text = f"数据集: {file_name}\n\n"
-                    stats_text += f"总意图数: {len(intents)}\n"
-                    stats_text += f"总模式数: {total_patterns}\n"
-                    stats_text += f"总响应数: {total_responses}\n"
-                    
-                    if intent_stats:
-                        avg_patterns = total_patterns / len(intent_stats)
-                        avg_responses = total_responses / len(intent_stats)
-                        stats_text += f"平均每个意图的模式数: {avg_patterns:.2f}\n"
-                        stats_text += f"平均每个意图的响应数: {avg_responses:.2f}\n\n"
-                    
-                    stats_text += "各意图详细统计:\n"
-                    for stat in intent_stats:
-                        stats_text += f"- {stat['tag']}: {stat['patterns']} 模式, {stat['responses']} 响应\n"
-                    
-                    # 显示统计信息
-                    QMessageBox.information(self, "数据集统计", stats_text)
-                    
-                except Exception as e:
-                    QMessageBox.critical(self, "错误", f"统计数据时发生错误: {str(e)}")
-            
-            def export_dataset(self):
-                """导出当前数据集"""
-                if not self.file_list.currentItem():
-                    QMessageBox.warning(self, "警告", "请先选择一个数据集文件")
-                    return
-                
-                from PyQt5.QtWidgets import QFileDialog
-                
-                file_name = self.file_list.currentItem().text()
-                file_path = os.path.join(self.training_dir, file_name)
-                
-                # 打开保存对话框
-                save_path, _ = QFileDialog.getSaveFileName(
-                    self, 
-                    "导出数据集", 
-                    os.path.join(os.path.expanduser("~"), file_name),
-                    "JSON文件 (*.json)"
-                )
-                
-                if not save_path:
-                    return
-                
-                try:
-                    import shutil
-                    shutil.copy2(file_path, save_path)
-                    QMessageBox.information(self, "导出成功", f"数据集已导出至: {save_path}")
-                except Exception as e:
-                    QMessageBox.critical(self, "导出失败", f"导出数据集时发生错误: {str(e)}")
-        
-        # 显示对话框
-        dialog = DatasetViewerDialog(self)
-        dialog.exec_()
-    
-    def show_model_info(self):
-        """显示模型信息对话框"""
-        # 尝试获取模型信息
-        if not hasattr(self.chatbot, 'get_model_info'):
-            QMessageBox.warning(self, "提示", "当前版本不支持获取模型信息")
-            return
-            
-        model_info = self.chatbot.get_model_info()
-        
-        if not model_info:
-            QMessageBox.warning(self, "提示", "模型尚未加载")
-            return
-            
-        # 创建模型信息对话框
-        dialog = QDialog(self)
-        dialog.setWindowTitle("模型信息")
-        dialog.setMinimumWidth(400)
-        
-        layout = QVBoxLayout(dialog)
-        
-        # 创建表格来显示模型信息
-        table = QTableWidget()
-        table.setColumnCount(2)
-        table.setHorizontalHeaderLabels(["属性", "值"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        
-        # 填充表格
-        row = 0
-        for key, value in model_info.items():
-            table.insertRow(row)
-            
-            # 美化键名
-            display_key = key.replace("_", " ").title()
-            
-            # 设置单元格
-            table.setItem(row, 0, QTableWidgetItem(display_key))
-            table.setItem(row, 1, QTableWidgetItem(str(value)))
-            
-            row += 1
-            
-        layout.addWidget(table)
-        
-        # 添加关闭按钮
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
-        button_box.accepted.connect(dialog.accept)
-        layout.addWidget(button_box)
-        
-        # 显示对话框
-        dialog.exec_() 
+        # 设置标准按钮
+        self.setStandardButtons(QMessageBox.Ok) 

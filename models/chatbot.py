@@ -23,10 +23,12 @@ if parent_dir not in sys.path:
 
 try:
     from models.text_processor import TextProcessor
+    from models.resource_manager import ResourceManager
 except ImportError:
     # 本地调试时可能需要调整路径
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from models.text_processor import TextProcessor
+    from models.resource_manager import ResourceManager
 
 class ChatModel(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, dropout_rate=0.3):
@@ -95,13 +97,13 @@ class ChatbotManager:
         # 仅解析已知参数，忽略未知参数
         args, _ = parser.parse_known_args()
         
-        # 路径设置
-        self.base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        self.models_dir = os.path.join(self.base_path, 'data', 'models')
-        self.training_data_path = os.path.join(self.base_path, 'data', 'training', 'intents.json')
+        # 获取资源管理器实例
+        self.resource_manager = ResourceManager()
         
-        # 确保模型目录存在
-        os.makedirs(self.models_dir, exist_ok=True)
+        # 路径设置
+        self.base_path = self.resource_manager.base_path
+        self.models_dir = self.resource_manager.models_dir
+        self.training_data_path = os.path.join(self.base_path, 'data', 'training', 'intents.json')
         
         # 如果通过参数提供了模型路径，优先使用该路径
         self.custom_model_path = model_path or args.model
@@ -116,10 +118,11 @@ class ChatbotManager:
         self.history = []
         
         # 调试模式设置
-        self.debug_mode = args.debug
+        self.debug_mode = args.debug or self.resource_manager.is_debug_mode()
+        self.resource_manager.set_debug_mode(self.debug_mode)
         
         # 置信度阈值设置
-        self.confidence_threshold = 0.3
+        self.confidence_threshold = self.resource_manager.get_confidence_threshold()
         
         # 加载训练数据
         self.load_training_data()
@@ -159,9 +162,15 @@ class ChatbotManager:
                 print(f"警告: 模型文件不存在: {model_path}")
                 return False
             
-            # 加载模型
-            with open(model_path, 'rb') as f:
-                model_data = pickle.load(f)
+            # 通过资源管理器加载模型
+            model_id = os.path.basename(model_path)
+            result = self.resource_manager.load_model(model_id)
+            
+            if not result["success"]:
+                print(f"警告: 模型加载失败: {result['error']}")
+                return False
+            
+            model_data = result["model"]
             
             self.model = model_data.get('model')
             self.all_words = model_data.get('all_words', [])
@@ -172,6 +181,12 @@ class ChatbotManager:
             self.load_matching_training_data()
             
             print(f"模型加载成功，包含 {len(self.tags)} 个意图")
+            
+            # 如果包含媒体资源，输出统计信息
+            media_count = len(self.resource_manager.media_resources)
+            if media_count > 0:
+                print(f"加载了 {media_count} 个媒体资源引用")
+            
             return True
         except Exception as e:
             print(f"加载模型时出错: {str(e)}")
@@ -249,130 +264,81 @@ class ChatbotManager:
                 })
             print("未找到匹配的训练数据文件，已创建中文默认回复")
     
-    def get_response(self, message, context=None, return_probs=False):
+    def get_response(self, text, include_media=True):
         """
-        根据输入消息生成回复
+        根据输入文本生成回复
         
         Args:
-            message (str): 用户输入的消息
-            context (dict, optional): 对话上下文信息
-            return_probs (bool, optional): 是否返回意图预测概率
+            text: 用户输入文本
+            include_media: 是否包含媒体信息
             
         Returns:
-            str: 生成的回复，或者在return_probs为True时返回(回复, 概率列表)
+            dict: 回复数据，包含文本和可能的媒体信息
         """
-        if not self.model or not self.tags or not self.all_words:
-            if not self.load_model():
-                return "抱歉，模型还未加载，无法回答您的问题。" if not return_probs else ("抱歉，模型还未加载，无法回答您的问题。", [])
+        # 存储回复
+        reply = {"text": "", "media_type": None, "media_path": None}
         
         try:
-            # 处理输入文本
-            tokens = self.text_processor.tokenize(message)
+            if not self.model:
+                reply["text"] = "我还没有经过训练，无法回答问题。请先训练我！"
+                return reply
+                
+            # 预处理输入文本
+            tokens = self.text_processor.tokenize(text)
             
             # 向量化
-            if self.vectorizer:
-                # 使用TF-IDF向量化
-                X = self.vectorizer.transform([' '.join(tokens)])
-                X = X.toarray()
-            else:
-                # 使用词袋模型向量化
-                X = np.zeros(len(self.all_words))
-                for i, word in enumerate(self.all_words):
-                    if word in tokens:
-                        X[i] = 1
-                
-                # 扩展维度以符合模型输入要求
-                X = X.reshape(1, -1)
+            X = self.vectorizer.transform([text]).toarray()
             
             # 预测
-            output = self.model.predict_proba(X)[0]
+            predictions = self.model.predict_proba(X)[0]
+            predicted_index = predictions.argmax()
+            confidence = predictions[predicted_index]
             
-            # 获取预测概率和对应标签
-            intent_probs = [(self.tags[i], float(prob)) for i, prob in enumerate(output)]
-            intent_probs.sort(key=lambda x: x[1], reverse=True)
+            predicted_tag = self.tags[predicted_index]
             
-            # 获取预测结果
-            predicted_tag = intent_probs[0][0]
-            probability = intent_probs[0][1]
-            
-            # 调试输出
             if self.debug_mode:
-                print(f"[DEBUG] 预测意图: {predicted_tag}, 概率: {probability:.2%}")
-                print(f"[DEBUG] 前三个意图及概率:")
-                for i, (tag, prob) in enumerate(intent_probs[:3]):
-                    print(f"  {i+1}. {tag}: {prob:.2%}")
+                print(f"预测标签: {predicted_tag}, 置信度: {confidence:.4f}")
             
-            # 如果概率低于阈值，返回默认回复
-            if probability < self.confidence_threshold:
-                response = "抱歉，我不太明白您的意思，能否换个方式表达？"
-                if self.debug_mode:
-                    response += f"\n[DEBUG INFO] 预测意图 '{predicted_tag}' 的置信度 ({probability:.2%}) 低于阈值 ({self.confidence_threshold:.2%})。"
-            else:
-                # 从训练数据中获取响应
-                found_response = False
-                
-                # 处理不同格式的训练数据
-                intents_to_search = []
-                
-                # 检查训练数据格式：是直接的列表还是包含 "intents" 键的字典
-                if isinstance(self.training_data, dict) and "intents" in self.training_data:
-                    # 如果是 {"intents": [...]} 格式
-                    intents_to_search = self.training_data["intents"]
-                    if self.debug_mode:
-                        print(f"[DEBUG] 训练数据格式: 字典格式，找到 {len(intents_to_search)} 个意图")
-                else:
-                    # 如果直接是意图列表
-                    intents_to_search = self.training_data
-                    if self.debug_mode:
-                        print(f"[DEBUG] 训练数据格式: 列表格式，包含 {len(intents_to_search)} 个意图")
-                
-                # 在意图列表中查找匹配的意图
-                for intent in intents_to_search:
-                    # 检查意图格式
-                    if isinstance(intent, dict) and 'tag' in intent:
-                        # 打印每个意图的标签以进行调试
-                        if intent['tag'] == predicted_tag:
-                            if self.debug_mode:
-                                print(f"[DEBUG] 找到匹配的意图: {predicted_tag}")
-                            if 'responses' in intent and intent['responses']:
-                                responses = intent['responses']
-                                if self.debug_mode:
-                                    print(f"[DEBUG] 响应数量: {len(responses)}")
-                                response = random.choice(responses)
-                                
-                                # 在调试模式下，添加调试信息到响应
-                                if self.debug_mode:
-                                    response += f"\n\n[DEBUG INFO] 意图: {predicted_tag}, 置信度: {probability:.2%}"
-                                
-                                found_response = True
-                                break
-                            else:
-                                if self.debug_mode:
-                                    print(f"[DEBUG] 意图 {predicted_tag} 没有响应字段或响应为空")
-                
-                if not found_response:
-                    # 如果未找到匹配的意图
-                    if self.debug_mode:
-                        print(f"[DEBUG] 未找到意图 {predicted_tag} 的匹配响应")
-                    response = "抱歉，我还不知道如何回答这个问题。"
+            # 如果置信度低于阈值，给出不确定的回复
+            if confidence < self.confidence_threshold:
+                reply["text"] = "对不起，我不太明白你的意思。能否换个方式表达？"
+                return reply
+            
+            # 查找匹配的意图
+            for intent in self.training_data:
+                if intent['tag'] == predicted_tag:
+                    # 随机选择一个回复
+                    responses = intent.get('responses', ["我理解了。"])
+                    reply["text"] = random.choice(responses)
                     
-                    # 在调试模式下，添加调试信息到响应
-                    if self.debug_mode:
-                        response += f"\n\n[DEBUG INFO] 尝试匹配意图 '{predicted_tag}'，但未找到对应的响应。"
+                    # 检查是否有媒体数据与该意图关联
+                    if include_media:
+                        media_info = self.resource_manager.get_media_resource(predicted_tag)
+                        if media_info:
+                            reply["media_type"] = media_info["type"]
+                            reply["media_path"] = media_info["path"]
+                    
+                    break
             
-            # 记录对话历史
-            self.add_to_history(message, response)
+            # 如果没有找到匹配的意图
+            if not reply["text"]:
+                reply["text"] = "对不起，我无法理解你的请求。"
+                
+            # 保存到历史记录
+            self.history.append({
+                'input': text,
+                'response': reply,
+                'timestamp': datetime.now().isoformat()
+            })
             
-            # 根据参数返回不同的结果
-            if return_probs:
-                return response, intent_probs
-            return response
+            return reply
             
         except Exception as e:
-            error_msg = f"生成回复时出错: {str(e)}"
-            print(error_msg)
+            error_message = f"生成回复时出错: {str(e)}"
+            print(error_message)
             traceback.print_exc()
-            return error_msg if not return_probs else (error_msg, [])
+            reply["text"] = "抱歉，处理您的请求时出错了。"
+            return reply
     
     def add_to_history(self, user_message, bot_response):
         """添加对话到历史记录"""
@@ -504,6 +470,12 @@ class ChatbotManager:
         Returns:
             bool: 训练是否成功
         """
+        # 获取训练锁
+        training_lock = self.resource_manager.get_lock("training")
+        if not training_lock.acquire(blocking=False):
+            print("错误: 已有训练任务在进行中")
+            return False
+        
         try:
             from models.text_processor import TextProcessor
             import numpy as np
@@ -522,6 +494,28 @@ class ChatbotManager:
                 return False
                 
             print(f"训练数据包含 {len(training_data)} 个意图")
+            
+            # 处理多模态数据 - 提取媒体信息并保存
+            media_resources = {}
+            media_count = 0
+            
+            for intent in training_data:
+                tag = intent.get("tag", "")
+                media_type = intent.get("media_type")
+                media_path = intent.get("media_path")
+                
+                # 如果意图包含媒体信息，保存到媒体资源映射中
+                if tag and media_type and media_path and os.path.exists(media_path):
+                    media_resources[tag] = {
+                        "type": media_type,
+                        "path": media_path
+                    }
+                    # 注册到资源管理器
+                    self.resource_manager.register_media_resource(tag, media_type, media_path)
+                    media_count += 1
+            
+            if media_count > 0:
+                print(f"处理了 {media_count} 个媒体资源引用")
             
             # 准备训练数据
             all_patterns = []
@@ -648,7 +642,8 @@ class ChatbotManager:
                 'model': self.model,
                 'vectorizer': self.vectorizer,
                 'all_words': self.all_words,
-                'tags': self.tags
+                'tags': self.tags,
+                'media_resources': media_resources  # 保存媒体资源映射
             }
             
             with open(model_path, 'wb') as f:
@@ -665,4 +660,7 @@ class ChatbotManager:
         except Exception as e:
             print(f"\n训练过程中出错: {str(e)}")
             traceback.print_exc()
-            return False 
+            return False
+        finally:
+            # 释放训练锁
+            training_lock.release() 

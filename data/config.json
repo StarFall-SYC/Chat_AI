@@ -1,0 +1,14 @@
+{
+  "confidence_threshold": 0.3,
+  "debug_mode": false,
+  "default_model": "chat_model.pth",
+  "ui": {
+    "theme": "blue",
+    "font_family": "Microsoft YaHei",
+    "font_size": 10
+  },
+  "advanced": {
+    "transformer_model": "THUDM/chatglm3-6b",
+    "stable_diffusion_model": "runwayml/stable-diffusion-v1-5"
+  }
+}
