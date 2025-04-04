@@ -148,6 +148,6 @@ MIT 许可证
 
 ## 联系方式
 
-项目维护者 - your-email@example.com
+项目维护者 - SYC_Hello@163.com
 
-项目链接: [https://github.com/your-username/ai-chat-model](https://github.com/your-username/ai-chat-model) 
+项目链接: [https://github.com/StarFall-SYC/ai-chat-model](https://github.com/StarFall-SYC/ai-chat-model) 
